@@ -12,7 +12,8 @@ import logging
 
 from config import (
     REPOSITORY, BASE_BRANCH, AUTO_MERGE_PRS, MAX_CYCLES,
-    DELAY_BETWEEN_CYCLES_SECONDS, MAX_CONSECUTIVE_FAILURES
+    DELAY_BETWEEN_CYCLES_SECONDS, MAX_CONSECUTIVE_FAILURES,
+    PR_READY_TIMEOUT_SECONDS
 )
 from copilot_trigger import trigger_copilot_via_gh_cli
 from pr_manager import (
@@ -146,8 +147,6 @@ def run_single_improvement_cycle(cycle_index: int) -> None:
       3. Wait for Copilot to finish working on the PR.
       4. Merge if checks pass.
     """
-    from config import PR_READY_TIMEOUT_SECONDS
-    
     print(f"\n========== Starting improvement cycle #{cycle_index} ==========")
     
     # Check for existing open PRs before starting new cycle

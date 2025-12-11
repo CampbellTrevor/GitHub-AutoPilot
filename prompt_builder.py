@@ -1,13 +1,29 @@
 """Prompt generation module.
 
 This module contains the logic for building improvement prompts for Copilot.
+
+Note: The default prompt is specifically tailored for the ArbitraryML project.
+To use this tool for other projects, customize the build_improvement_prompt function
+to generate prompts appropriate for your project's domain and goals.
 """
 
 from github_api import split_owner_repo
 
 
 def build_improvement_prompt(repository: str, base_branch: str) -> str:
-    """Build a comprehensive improvement prompt for Copilot coding agent."""
+    """Build a comprehensive improvement prompt for Copilot coding agent.
+    
+    This default implementation is tailored for the ArbitraryML project.
+    Customize this function for other projects by modifying the prompt template
+    to match your project's specific requirements and goals.
+    
+    Args:
+        repository: Repository in 'owner/repo' format
+        base_branch: Target branch for improvements
+        
+    Returns:
+        Formatted prompt string for Copilot
+    """
     owner, repo = split_owner_repo(repository)
 
     return f"""
