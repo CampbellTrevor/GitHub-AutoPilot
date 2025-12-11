@@ -1,21 +1,115 @@
 """Prompt generation module.
 
 This module contains the logic for building improvement prompts for Copilot.
-
-Note: The default prompt is specifically tailored for the ArbitraryML project.
-To use this tool for other projects, customize the build_improvement_prompt function
-to generate prompts appropriate for your project's domain and goals.
+The prompts are generally applicable and adapt to any repository based on:
+- Repository structure and files
+- Recent commit history
+- A central CONTEXT.md file (if present) for project-specific guidance
 """
 
+import os
+import subprocess
+from typing import Optional
 from github_api import split_owner_repo
+
+
+def get_repository_structure(repo_path: str = ".") -> str:
+    """Get a summary of the repository structure.
+    
+    Args:
+        repo_path: Path to the repository (default: current directory)
+        
+    Returns:
+        String representation of the repository structure
+    """
+    try:
+        # Use tree command if available, otherwise fall back to find
+        tree_cmd = subprocess.run(
+            ["tree", "-L", "2", "-I", "node_modules|.git|__pycache__|*.pyc|dist|build", repo_path],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if tree_cmd.returncode == 0:
+            return tree_cmd.stdout
+        
+        # Fallback: use find command
+        find_cmd = subprocess.run(
+            ["find", repo_path, "-maxdepth", "2", "-type", "f", 
+             "!", "-path", "*/.*", "!", "-path", "*/node_modules/*", 
+             "!", "-path", "*/__pycache__/*"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if find_cmd.returncode == 0 and find_cmd.stdout.strip():
+            files = find_cmd.stdout.strip().split("\n")
+            return "Repository files:\n" + "\n".join(f"  {f}" for f in files[:50])  # Limit to 50 files
+        
+        return "Unable to determine repository structure"
+        
+    except Exception as e:
+        return f"Error reading repository structure: {e}"
+
+
+def get_recent_commits(repo_path: str = ".", limit: int = 10) -> str:
+    """Get recent commit history.
+    
+    Args:
+        repo_path: Path to the repository (default: current directory)
+        limit: Number of recent commits to fetch
+        
+    Returns:
+        String representation of recent commits
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_path, "log", f"-{limit}", "--oneline", "--decorate"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0:
+            return result.stdout.strip()
+        
+        return "Unable to fetch commit history"
+        
+    except Exception as e:
+        return f"Error reading commit history: {e}"
+
+
+def read_context_file(repo_path: str = ".") -> Optional[str]:
+    """Read the CONTEXT.md file if it exists.
+    
+    Args:
+        repo_path: Path to the repository (default: current directory)
+        
+    Returns:
+        Contents of CONTEXT.md or None if it doesn't exist
+    """
+    context_path = os.path.join(repo_path, "CONTEXT.md")
+    
+    if os.path.exists(context_path):
+        try:
+            with open(context_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            return f"Error reading CONTEXT.md: {e}"
+    
+    return None
 
 
 def build_improvement_prompt(repository: str, base_branch: str) -> str:
     """Build a comprehensive improvement prompt for Copilot coding agent.
     
-    This default implementation is tailored for the ArbitraryML project.
-    Customize this function for other projects by modifying the prompt template
-    to match your project's specific requirements and goals.
+    This implementation is generally applicable to any repository. It:
+    - Analyzes the repository structure
+    - Reviews recent commits
+    - Reads project-specific context from CONTEXT.md (if present)
+    - Instructs the agent to generate and work on prioritized tasks
     
     Args:
         repository: Repository in 'owner/repo' format
@@ -25,138 +119,137 @@ def build_improvement_prompt(repository: str, base_branch: str) -> str:
         Formatted prompt string for Copilot
     """
     owner, repo = split_owner_repo(repository)
+    
+    # Gather repository information
+    repo_structure = get_repository_structure()
+    recent_commits = get_recent_commits()
+    context_content = read_context_file()
+    
+    # Build the prompt
+    prompt_parts = []
+    
+    # Header
+    prompt_parts.append(f"""You are working on the repository {owner}/{repo} (branch: {base_branch}).
 
-    return f"""
-You are a senior machine learning engineer working on {owner}/{repo} - ArbitraryML, an automated ML pipeline that generates complete ML solutions for any arbitrary CSV file using AI-assisted analysis.
+Your role is to continuously improve this codebase by identifying and implementing the next most valuable changes.""")
+    
+    # Repository structure
+    prompt_parts.append(f"""
+## REPOSITORY STRUCTURE
 
-PROJECT CONTEXT:
-ArbitraryML uses AI agents (Google Gemini or placeholder mode) to automatically analyze unlabeled data and determine the best ML approach. The pipeline ASSUMES UNSUPERVISED LEARNING by default and intelligently decides between clustering, anomaly detection, PU learning, or other unsupervised methods based on data characteristics.
+{repo_structure}
+""")
+    
+    # Recent commits
+    prompt_parts.append(f"""
+## RECENT COMMITS (Last 10)
 
-CORE PHILOSOPHY: 
-**Default to Unsupervised** - Assume no labeled target exists. The AI agent analyzes the data and selects the most appropriate unsupervised approach:
-- **Clustering**: Group similar rows (K-means, DBSCAN, hierarchical)
-- **Anomaly Detection**: Identify outliers and unusual patterns (Isolation Forest, One-Class SVM, LOF)
-- **PU Learning**: If patterns suggest some positive examples exist in unlabeled data
-- **Dimensionality Reduction**: PCA, t-SNE, UMAP for pattern discovery
-- **Association Rules**: Find correlations and frequent patterns
-- **Density Estimation**: Understand data distribution
+{recent_commits}
+""")
+    
+    # Project-specific context
+    if context_content:
+        prompt_parts.append(f"""
+## PROJECT CONTEXT (from CONTEXT.md)
 
-CORE PIPELINE STAGES:
-1. **Analyze Data Structure**: Examine CSV for patterns, distributions, correlations, and data characteristics
-2. **Select Unsupervised Approach**: AI agent intelligently chooses the best method(s) based on data properties
-3. **Engineer Features**: Create representations suitable for the chosen unsupervised method
-4. **Implement Solution**: Apply clustering, anomaly detection, or other selected approaches with tuning
-5. **Evaluate & Interpret**: Assess quality (silhouette scores, anomaly scores, etc.) and generate insights
-6. **Generate Output**: Create comprehensive reports showing discovered patterns, clusters, anomalies
+{context_content}
+""")
+    else:
+        prompt_parts.append("""
+## PROJECT CONTEXT
 
-PRIMARY MISSION: Build an intelligent unsupervised ML system that can discover meaningful patterns, clusters, and anomalies in any arbitrary dataset without requiring labeled data.
+No CONTEXT.md file found. Use the repository structure, code, and commit history to understand the project.
+""")
+    
+    # Core instructions
+    prompt_parts.append("""
+## YOUR TASK - CYCLE-BASED CONTINUOUS IMPROVEMENT
 
-Priority Focus Areas:
+### At the START of Each Cycle:
+1. **Review Current State:**
+   - Examine the repository structure and key files
+   - Review recent commits to understand what's been done
+   - Read CONTEXT.md (if present) for project-specific priorities and context
 
-1. **Unsupervised Method Selection & Intelligence:**
-   - AI agent intelligently selects the best unsupervised approach(es) for the data
-   - Implement multiple unsupervised techniques and compare results
-   - Add PU (Positive-Unlabeled) learning when patterns suggest it's appropriate
-   - Detect when semi-supervised methods could be beneficial
-   - Automatically determine optimal number of clusters or anomaly thresholds
-   - Add ensemble approaches combining multiple unsupervised methods
+2. **Generate Prioritized Task List:**
+   - Based on the repository state, recent work, and context, create a list of 3-5 high-value improvements
+   - Prioritize tasks by impact and feasibility
+   - Consider: bug fixes, feature additions, code quality, testing, performance, documentation-in-code
+   - Format as a checklist in your PR description
 
-2. **Feature Engineering & Data Processing:**
-   - Expand automatic feature generation capabilities (interactions, polynomials, aggregations)
-   - Improve handling of missing data with intelligent imputation strategies
-   - Add automatic outlier detection and handling
-   - Implement feature scaling and normalization strategies per algorithm requirements
-   - Add dimensionality reduction when appropriate (PCA, feature selection)
-   - Handle time-series features, text data, and other special data types
+3. **Select and Execute:**
+   - Pick the highest-priority task from your list
+   - Implement it completely with working code
+   - Test your changes thoroughly
 
-3. **Unsupervised Algorithm Implementation:**
-   - Implement multiple clustering algorithms (K-means, DBSCAN, hierarchical, Gaussian Mixture)
-   - Add robust anomaly detection methods (Isolation Forest, One-Class SVM, LOF, Elliptic Envelope)
-   - Implement PU learning algorithms for detecting positive examples in unlabeled data
-   - Add dimensionality reduction techniques (PCA, t-SNE, UMAP) for visualization and pattern discovery
-   - Implement density estimation and distribution analysis
-   - Add association rule mining for finding correlations
+### At the END of Each Cycle (Before Completing):
+1. **Review CONTEXT.md:**
+   - Re-read CONTEXT.md to ensure alignment with project goals
+   - Check if priorities have shifted
 
-4. **Unsupervised Evaluation & Interpretability:**
-   - Implement clustering quality metrics (silhouette score, Davies-Bouldin, Calinski-Harabasz)
-   - Add anomaly detection evaluation (contamination analysis, score distributions)
-   - Implement cluster profiling and characterization
-   - Add visualization of discovered patterns (cluster plots, anomaly heatmaps, dendrograms)
-   - Generate actionable insights about discovered groups and outliers
-   - Add cluster stability analysis and consistency metrics
-   - Implement feature importance for cluster/anomaly discrimination
+2. **Update Task List:**
+   - Mark completed tasks as done
+   - Reprioritize remaining tasks based on:
+     * New insights from your work
+     * Updated context from CONTEXT.md
+     * Recent commits from other contributors
+   
+3. **Prepare for Next Cycle:**
+   - Note what should be done next (for the next agent cycle)
+   - Ensure your work integrates cleanly
 
-5. **Pipeline Robustness & Error Handling:**
-   - Improve error handling throughout the pipeline with clear, actionable messages
-   - Add data validation and quality checks at each stage
-   - Implement logging and progress tracking for long-running operations
-   - Add graceful degradation when AI services are unavailable
-   - Improve placeholder mode to be more intelligent and useful
-   - Add pipeline checkpointing for resumability
+## CRITICAL RULES
 
-6. **Visualization-First Output & Reporting:**
-   - **PRIMARY FOCUS**: Make reporting HEAVILY visualization-based
-   - Generate comprehensive visualizations tailored to the unsupervised method used:
-     * **Clustering**: Scatter plots with cluster colors, dendrograms, silhouette plots, cluster size distributions, 2D/3D projections (PCA/t-SNE/UMAP), pair plots showing cluster separation
-     * **Anomaly Detection**: Anomaly score distributions, outlier scatter plots with scores, feature-wise anomaly heatmaps, decision boundary visualizations, contamination analysis plots
-     * **PU Learning**: Positive/unlabeled separation plots, confidence score distributions, decision boundary visualizations
-     * **Dimensionality Reduction**: 2D/3D embeddings with interactive exploration, explained variance plots, component loading heatmaps
-     * **General**: Correlation matrices, feature distribution plots, data quality heatmaps, missing data patterns
-   - Create interactive HTML reports with embedded visualizations (plotly, bokeh)
-   - Generate static plot exports (PNG/SVG) for presentations
-   - Add data exploration dashboards showing multiple views simultaneously
-   - Visualize data quality and preprocessing steps
-   - Include visual comparison of different methods tried
-   - Minimal text, maximum visual insights - let plots tell the story
-   - Add model export functionality (pickle, joblib) as secondary to visualizations
+### DO:
+- ✅ Implement complete, working code changes
+- ✅ Write tests for your changes
+- ✅ Document code with clear docstrings and type hints
+- ✅ Make minimal, focused changes per cycle
+- ✅ Fix bugs and improve code quality
+- ✅ Read and respect CONTEXT.md priorities
+- ✅ Update README if your changes affect high-level usage
+- ✅ Create a clear, descriptive PR title and description
+- ✅ Include your task checklist in the PR description
 
-7. **Testing & Code Quality:**
-   - Add comprehensive unit tests for each pipeline stage
-   - Implement integration tests with diverse sample datasets
-   - Add performance benchmarking and regression testing
-   - Improve code modularity and maintainability
-   - Add type hints and clear docstrings in the code itself
-   - Implement continuous testing with GitHub Actions
+### DO NOT:
+- ❌ Create standalone documentation files (CONTEXT.md is the exception, maintained by humans)
+- ❌ Create TODO.md, PLAN.md, ROADMAP.md, or similar planning documents
+- ❌ Create extensive markdown files for features or processes
+- ❌ Make incomplete or half-finished changes
+- ❌ Break existing functionality
+- ❌ Add dependencies without careful consideration
+- ❌ Ignore test failures
 
-Guidelines:
-1. Think end-to-end: every change should improve the overall pipeline intelligence
-2. Prioritize automation - reduce manual decision-making wherever possible
-3. Handle edge cases gracefully - the pipeline should work on diverse, messy real-world data
-4. Make AI interactions robust - handle API failures, rate limits, and placeholder mode elegantly
-5. Build incrementally - extend working features rather than rewriting from scratch
-6. Consider production deployment - code should be production-ready, not just experimental
-7. Focus on interpretability - users need to understand what the model does and why
-8. Optimize for speed - pipelines should run efficiently even on larger datasets
-9. Document in code - use clear docstrings, type hints, and inline comments where needed
+## DOCUMENTATION PHILOSOPHY
 
-Documentation Philosophy:
-- Do NOT create excessive separate documentation files
-- Document IN THE CODE with clear docstrings and type hints
-- Keep README as a holistic overview only, not detailed feature explanations
-- Avoid creating lengthy markdown files for each feature
-- Self-documenting code is preferred over external documentation
-- If extensive knowledge management is needed in the future, use GitHub Wiki instead
+**Document IN the code, not in separate files:**
+- Use clear function/class names
+- Write comprehensive docstrings
+- Add inline comments for complex logic
+- Use type hints
+- Keep README as high-level overview only
+- Let CONTEXT.md be the single source of project-level guidance (human-maintained)
 
-CRITICAL - Implementation Requirements:
-- You MUST actually implement all code changes yourself - don't just suggest or outline changes
-- Write complete, working code for every change you make
-- After making changes, you MUST verify them with comprehensive unit tests
-- IMPORTANT: The Google Gemini API may NOT be available during your work - ensure placeholder mode works fully
-- Use offline testing methods: mock AI API calls, create synthetic test datasets, use fixtures
-- All tests must be self-contained and runnable without external API services
-- If code depends on Gemini API, mock it completely in tests and ensure placeholder mode is functional
-- Run all tests locally to ensure everything works before submitting the PR
-- Fix any test failures yourself - the PR should be ready to merge
+## DELIVERABLES FOR THIS CYCLE
 
-Deliverables:
-- ONE comprehensive pull request with a clear, unified theme
-- Detailed PR description explaining what was changed and why
-- Well-structured commits that show logical progression
-- Complete unit tests for all changed functionality
-- Code with clear docstrings and type hints (NOT separate documentation files)
-- Update README only if it affects the high-level overview
-- All tests passing with mocked dependencies
-- Example outputs demonstrating new capabilities
+1. **Working Code:** Complete implementation of your highest-priority task
+2. **Tests:** Unit tests validating your changes
+3. **PR Description:** 
+   - Clear title describing what you did
+   - Checklist showing completed and remaining prioritized tasks
+   - Brief explanation of changes
+4. **No New Documentation Files:** Document in code only
 
-Build intelligence. Automate decisions. Handle edge cases. Make it production-ready. Document in code, not files. Implement everything yourself. Test thoroughly.
-""".strip()
+## QUALITY STANDARDS
+
+- Code must be production-ready
+- All tests must pass
+- Changes must be minimal and focused
+- Code must be well-structured and maintainable
+- Error handling must be robust
+- Security vulnerabilities must be avoided
+
+Begin by analyzing the repository and generating your prioritized task list. Then implement the top priority item.
+""")
+    
+    return "\n".join(prompt_parts).strip()

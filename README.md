@@ -272,23 +272,49 @@ URL: https://github.com/CampbellTrevor/ArbitraryML/pull/42
 ========== Finished improvement cycle #1 ==========
 ```
 
-## Customizing Prompts
+## Customizing for Your Project
 
-Edit `prompt_builder.py` to customize the improvement prompts sent to Copilot:
+### Using CONTEXT.md
 
-```python
-def build_improvement_prompt(repository: str, base_branch: str) -> str:
-    """Build a comprehensive improvement prompt for Copilot coding agent."""
-    return """
-    Your custom prompt here...
-    
-    Focus areas:
-    1. Add comprehensive tests
-    2. Improve error handling
-    3. Refactor for clarity
-    ...
-    """
+The prompt builder automatically reads from a `CONTEXT.md` file in your repository root to provide project-specific guidance to the Copilot agent. This is the **recommended way** to customize behavior for your project.
+
+Create a `CONTEXT.md` file with:
+- Project purpose and goals
+- Current priorities
+- Architecture principles
+- Key modules and their responsibilities
+- What to focus on / what to avoid
+
+Example `CONTEXT.md`:
+```markdown
+# My Project - Context
+
+## Purpose
+This project does X, Y, and Z.
+
+## Current Priorities
+1. Improve test coverage
+2. Refactor the database layer
+3. Add API documentation
+
+## What NOT to Do
+- Don't modify the legacy module
+- Don't change the public API
 ```
+
+The agent will:
+- Read this context at the **start of each cycle**
+- Re-read it at the **end of each cycle** to reprioritize
+- Generate task lists aligned with your priorities
+- Avoid creating new documentation files (only update code)
+
+### Advanced: Customizing the Prompt Builder
+
+If you need more control, you can modify `prompt_builder.py` to change how prompts are generated. The default implementation:
+- Analyzes repository structure
+- Reviews recent commits
+- Reads CONTEXT.md (if present)
+- Generates generally applicable improvement instructions
 
 ## Troubleshooting
 

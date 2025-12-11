@@ -8,7 +8,7 @@ import os
 
 # GitHub API Configuration
 GITHUB_API_URL = "https://api.github.com"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # PAT or GitHub Actions token
+GITHUB_TOKEN = os.getenv("GH_TOKEN")  # PAT or GitHub Actions token
 
 # Repository Configuration
 REPOSITORY = os.getenv("TARGET_REPOSITORY", "CampbellTrevor/ArbitraryML")  # e.g., "owner/repo"
