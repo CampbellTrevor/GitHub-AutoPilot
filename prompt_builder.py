@@ -10,7 +10,7 @@ The prompts are generally applicable and adapt to any repository based on:
 import os
 import subprocess
 from typing import Optional
-from github_api import split_owner_repo
+from github_api import split_owner_repo, get_repository_tree, get_repository_commits, get_repository_file
 
 
 def get_repository_structure(repo_path: str = ".") -> str:
@@ -120,10 +120,10 @@ def build_improvement_prompt(repository: str, base_branch: str) -> str:
     """
     owner, repo = split_owner_repo(repository)
     
-    # Gather repository information
-    repo_structure = get_repository_structure()
-    recent_commits = get_recent_commits()
-    context_content = read_context_file()
+    # Gather repository information from the target repository via GitHub API
+    repo_structure = get_repository_tree(repository, base_branch)
+    recent_commits = get_repository_commits(repository, base_branch)
+    context_content = get_repository_file(repository, "CONTEXT.md", base_branch)
     
     # Build the prompt
     prompt_parts = []

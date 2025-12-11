@@ -148,3 +148,132 @@ def get_repository_id(repository: str) -> str:
         raise RuntimeError(f"Could not fetch repository ID for {repository}")
     
     return repo_id
+
+
+def get_repository_tree(repository: str, branch: str = "main") -> str:
+    """Get repository file tree via GitHub API.
+    
+    Args:
+        repository: Repository in 'owner/repo' format
+        branch: Branch name to get tree from
+        
+    Returns:
+        String representation of repository structure
+    """
+    owner, repo = split_owner_repo(repository)
+    
+    try:
+        # Get the tree via REST API
+        url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+        response = session.get(url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        tree = data.get("tree", [])
+        if not tree:
+            return "Unable to fetch repository structure"
+        
+        # Build a simple tree representation
+        # Filter out common excludes and limit depth
+        files = []
+        for item in tree[:100]:  # Limit to first 100 items
+            path = item.get("path", "")
+            item_type = item.get("type", "")
+            
+            # Skip common excludes
+            if any(exclude in path for exclude in [".git/", "node_modules/", "__pycache__/", ".pyc", "dist/", "build/"]):
+                continue
+            
+            # Count depth
+            depth = path.count("/")
+            if depth > 2:  # Limit to 2 levels deep
+                continue
+            
+            indent = "  " * depth
+            if item_type == "tree":
+                files.append(f"{indent}{path.split('/')[-1]}/")
+            else:
+                files.append(f"{indent}{path.split('/')[-1]}")
+        
+        if files:
+            return "Repository structure:\n" + "\n".join(files)
+        
+        return "Repository structure not available"
+        
+    except Exception as e:
+        return f"Error fetching repository structure: {e}"
+
+
+def get_repository_commits(repository: str, branch: str = "main", limit: int = 10) -> str:
+    """Get recent commits via GitHub API.
+    
+    Args:
+        repository: Repository in 'owner/repo' format
+        branch: Branch name to get commits from
+        limit: Number of recent commits to fetch
+        
+    Returns:
+        String representation of recent commits
+    """
+    owner, repo = split_owner_repo(repository)
+    
+    try:
+        # Get commits via REST API
+        url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/commits"
+        params = {"sha": branch, "per_page": limit}
+        response = session.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        commits = response.json()
+        
+        if not commits:
+            return "No commits found"
+        
+        # Format commits similar to git log --oneline
+        commit_lines = []
+        for commit in commits:
+            sha = commit.get("sha", "")[:7]  # Short SHA
+            message = commit.get("commit", {}).get("message", "").split("\n")[0]  # First line only
+            commit_lines.append(f"{sha} {message}")
+        
+        return "\n".join(commit_lines)
+        
+    except Exception as e:
+        return f"Error fetching commit history: {e}"
+
+
+def get_repository_file(repository: str, file_path: str, branch: str = "main") -> Optional[str]:
+    """Get contents of a specific file via GitHub API.
+    
+    Args:
+        repository: Repository in 'owner/repo' format
+        file_path: Path to file in repository
+        branch: Branch name to get file from
+        
+    Returns:
+        File contents as string, or None if file doesn't exist
+    """
+    owner, repo = split_owner_repo(repository)
+    
+    try:
+        # Get file contents via REST API
+        url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/contents/{file_path}"
+        params = {"ref": branch}
+        response = session.get(url, params=params, timeout=30)
+        
+        if response.status_code == 404:
+            return None
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        # Decode base64 content
+        import base64
+        content = data.get("content", "")
+        if content:
+            return base64.b64decode(content).decode("utf-8")
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"Error fetching file {file_path}: {e}")
+        return None
