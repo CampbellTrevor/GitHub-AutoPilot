@@ -9,7 +9,7 @@ import sys
 import time
 import signal
 import logging
-from typing import Optional
+from typing import Optional, Callable
 
 from config import (
     REPOSITORY, BASE_BRANCH, AUTO_MERGE_PRS, MAX_CYCLES,
@@ -55,7 +55,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 
 def wait_for_existing_prs_to_complete(repository: str, timeout: int, 
-                                     shutdown_check: Optional[callable] = None) -> bool:
+                                     shutdown_check: Optional[Callable[[], bool]] = None) -> bool:
     """Check for existing open Copilot PRs and wait for them to be ready.
     
     Args:
@@ -145,7 +145,7 @@ def wait_for_existing_prs_to_complete(repository: str, timeout: int,
     return True
 
 
-def run_single_improvement_cycle(cycle_index: int, shutdown_check: Optional[callable] = None) -> None:
+def run_single_improvement_cycle(cycle_index: int, shutdown_check: Optional[Callable[[], bool]] = None) -> None:
     """Run one improvement cycle.
     
     Steps:

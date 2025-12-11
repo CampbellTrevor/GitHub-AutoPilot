@@ -41,7 +41,8 @@ class TestGracefulExit(unittest.TestCase):
     
     def test_interruptible_sleep_with_shutdown(self):
         """Test _interruptible_sleep stops early on shutdown."""
-        shutdown_check = Mock(side_effect=[False, False, True])  # Stop after 3 calls
+        # Return False twice, then True, then continue returning True
+        shutdown_check = Mock(side_effect=[False, False, True] + [True] * 10)
         
         start = time.time()
         result = _interruptible_sleep(10, shutdown_check)
