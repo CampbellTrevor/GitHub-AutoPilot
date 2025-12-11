@@ -1,3 +1,22 @@
+"""
+DEPRECATED: This file has been refactored into separate modules.
+
+Please use main.py instead:
+    python main.py
+
+The new modular architecture provides:
+- config.py - Configuration and environment variables
+- github_api.py - GitHub REST and GraphQL API client
+- issue_manager.py - Issue creation and management
+- pr_manager.py - Pull request operations
+- copilot_trigger.py - GitHub Copilot CLI integration
+- prompt_builder.py - Improvement prompt generation
+- metrics.py - Performance metrics tracking
+- main.py - Main orchestration loop
+
+This file is kept for reference only and will be removed in a future version.
+"""
+
 import os
 import sys
 import time
