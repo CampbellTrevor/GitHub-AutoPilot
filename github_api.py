@@ -4,6 +4,7 @@ This module provides functions for interacting with GitHub's REST and GraphQL AP
 including rate limiting, retries, and common API operations.
 """
 
+import base64
 import time
 import logging
 import requests
@@ -13,6 +14,10 @@ from datetime import datetime
 from config import GITHUB_API_URL, GITHUB_TOKEN
 
 logger = logging.getLogger(__name__)
+
+# Constants for repository tree fetching
+MAX_TREE_ITEMS = 100
+MAX_TREE_DEPTH = 2
 
 # Initialize HTTP session with authentication
 session = requests.Session()
@@ -176,7 +181,7 @@ def get_repository_tree(repository: str, branch: str = "main") -> str:
         # Build a simple tree representation
         # Filter out common excludes and limit depth
         files = []
-        for item in tree[:100]:  # Limit to first 100 items
+        for item in tree[:MAX_TREE_ITEMS]:  # Limit to avoid overwhelming output
             path = item.get("path", "")
             item_type = item.get("type", "")
             
@@ -186,7 +191,7 @@ def get_repository_tree(repository: str, branch: str = "main") -> str:
             
             # Count depth
             depth = path.count("/")
-            if depth > 2:  # Limit to 2 levels deep
+            if depth > MAX_TREE_DEPTH:  # Limit to avoid overwhelming output
                 continue
             
             indent = "  " * depth
@@ -267,7 +272,6 @@ def get_repository_file(repository: str, file_path: str, branch: str = "main") -
         data = response.json()
         
         # Decode base64 content
-        import base64
         content = data.get("content", "")
         if content:
             return base64.b64decode(content).decode("utf-8")
