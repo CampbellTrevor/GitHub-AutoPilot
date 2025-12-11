@@ -169,7 +169,7 @@ No CONTEXT.md file found. Use the repository structure, code, and commit history
 1. **Review Current State:**
    - Examine the repository structure and key files
    - Review recent commits to understand what's been done
-   - Read CONTEXT.md (if present) for project-specific priorities and context
+   - Read CONTEXT.md (if present, if not present make a CONTEXT.md file) for project-specific priorities and context
 
 2. **Generate Prioritized Task List:**
    - Based on the repository state, recent work, and context, create a list of 3-5 high-value improvements
