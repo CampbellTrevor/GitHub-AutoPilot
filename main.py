@@ -9,6 +9,7 @@ import sys
 import time
 import signal
 import logging
+from typing import Optional
 
 from config import (
     REPOSITORY, BASE_BRANCH, AUTO_MERGE_PRS, MAX_CYCLES,
@@ -53,10 +54,16 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
-def wait_for_existing_prs_to_complete(repository: str, timeout: int) -> bool:
+def wait_for_existing_prs_to_complete(repository: str, timeout: int, 
+                                     shutdown_check: Optional[callable] = None) -> bool:
     """Check for existing open Copilot PRs and wait for them to be ready.
     
-    Returns True if all PRs are ready or no PRs exist, False on timeout.
+    Args:
+        repository: Repository in owner/repo format
+        timeout: Maximum seconds to wait
+        shutdown_check: Optional callable that returns True if shutdown was requested
+    
+    Returns True if all PRs are ready or no PRs exist, False on timeout or shutdown.
     """
     print("\n[Pre-cycle check] Checking for existing open Copilot PRs...")
     
@@ -75,7 +82,7 @@ def wait_for_existing_prs_to_complete(repository: str, timeout: int) -> bool:
         print(f"[Pre-cycle check] PR #{pr_number}: {title}")
         
         # Wait for this PR to be ready
-        pr_ready = wait_for_pr_ready(repository, pr_number, timeout)
+        pr_ready = wait_for_pr_ready(repository, pr_number, timeout, shutdown_check)
         
         if not pr_ready:
             print(f"[Pre-cycle check] ⚠️  PR #{pr_number} did not become ready in time")
@@ -94,7 +101,7 @@ def wait_for_existing_prs_to_complete(repository: str, timeout: int) -> bool:
             # Mark as ready for review if it's a draft
             mark_pr_ready_for_review(repository, pr_number)
             
-            checks_passed = wait_for_pr_checks(repository, pr_number)
+            checks_passed = wait_for_pr_checks(repository, pr_number, shutdown_check=shutdown_check)
             
             if checks_passed:
                 merge_success = merge_pull_request(repository, pr_number)
@@ -138,7 +145,7 @@ def wait_for_existing_prs_to_complete(repository: str, timeout: int) -> bool:
     return True
 
 
-def run_single_improvement_cycle(cycle_index: int) -> None:
+def run_single_improvement_cycle(cycle_index: int, shutdown_check: Optional[callable] = None) -> None:
     """Run one improvement cycle.
     
     Steps:
@@ -146,11 +153,17 @@ def run_single_improvement_cycle(cycle_index: int) -> None:
       2. Trigger Copilot via gh CLI with base branch specified.
       3. Wait for Copilot to finish working on the PR.
       4. Merge if checks pass.
+      
+    Args:
+        cycle_index: Current cycle number
+        shutdown_check: Optional callable that returns True if shutdown was requested
     """
     print(f"\n========== Starting improvement cycle #{cycle_index} ==========")
     
     # Check for existing open PRs before starting new cycle
-    existing_prs_ready = wait_for_existing_prs_to_complete(REPOSITORY, PR_READY_TIMEOUT_SECONDS)
+    existing_prs_ready = wait_for_existing_prs_to_complete(
+        REPOSITORY, PR_READY_TIMEOUT_SECONDS, shutdown_check
+    )
     
     if not existing_prs_ready:
         raise RuntimeError(
@@ -178,6 +191,11 @@ def run_single_improvement_cycle(cycle_index: int) -> None:
         max_wait = 300  # 5 minutes to create PR
         
         while (time.time() - start_time) < max_wait:
+            # Check for shutdown request
+            if shutdown_check and shutdown_check():
+                logger.info("Shutdown requested during PR creation wait")
+                return
+            
             copilot_prs = get_open_copilot_prs(REPOSITORY)
             
             if copilot_prs:
@@ -189,7 +207,13 @@ def run_single_improvement_cycle(cycle_index: int) -> None:
             
             elapsed = int(time.time() - start_time)
             print(f"Waiting for PR creation... ({elapsed}s elapsed)")
-            time.sleep(10)
+            
+            # Sleep in small increments to check for shutdown
+            for _ in range(10):
+                if shutdown_check and shutdown_check():
+                    logger.info("Shutdown requested during PR creation wait")
+                    return
+                time.sleep(1)
         
         if pr_number == -1:
             raise RuntimeError(f"Copilot did not create a PR within {max_wait}s")
@@ -208,7 +232,7 @@ def run_single_improvement_cycle(cycle_index: int) -> None:
         print(f"\n[PR #{pr_number}] Auto-merge enabled - attempting to merge...")
         
         # Wait for Copilot to finish working (no WIP, reviewer assigned)
-        pr_ready = wait_for_pr_ready(REPOSITORY, pr_number)
+        pr_ready = wait_for_pr_ready(REPOSITORY, pr_number, shutdown_check=shutdown_check)
         
         if not pr_ready:
             print(f"[PR #{pr_number}] ⚠️  PR did not become ready in time - skipping merge")
@@ -225,7 +249,7 @@ def run_single_improvement_cycle(cycle_index: int) -> None:
             mark_pr_ready_for_review(REPOSITORY, pr_number)
             
             # Wait for checks to complete
-            checks_passed = wait_for_pr_checks(REPOSITORY, pr_number)
+            checks_passed = wait_for_pr_checks(REPOSITORY, pr_number, shutdown_check=shutdown_check)
             
             if checks_passed:
                 # Attempt to merge
@@ -287,6 +311,9 @@ def continuous_improvement_loop() -> None:
     logger.info(f"Delay Between Cycles: {DELAY_BETWEEN_CYCLES_SECONDS}s")
     logger.info("="*60)
     
+    # Create a shutdown check lambda
+    shutdown_check = lambda: _shutdown_requested
+    
     try:
         while True:
             # Check if shutdown requested
@@ -306,7 +333,7 @@ def continuous_improvement_loop() -> None:
             
             try:
                 logger.info(f"\nStarting cycle #{cycle_index}...")
-                run_single_improvement_cycle(cycle_index)
+                run_single_improvement_cycle(cycle_index, shutdown_check)
                 consecutive_failures = 0  # Reset on success
                 successful_cycles += 1
                 

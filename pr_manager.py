@@ -8,7 +8,7 @@ import re
 import time
 import logging
 import requests
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 
 from config import (
     GITHUB_API_URL, BASE_BRANCH, PR_READY_TIMEOUT_SECONDS, 
@@ -18,6 +18,39 @@ from github_api import session, split_owner_repo, graphql_query
 from issue_manager import close_issue
 
 logger = logging.getLogger(__name__)
+
+
+def _should_stop_waiting(shutdown_check: Optional[Callable[[], bool]] = None) -> bool:
+    """Check if we should stop waiting due to shutdown request.
+    
+    Args:
+        shutdown_check: Optional callable that returns True if shutdown was requested
+        
+    Returns:
+        True if shutdown was requested, False otherwise
+    """
+    if shutdown_check and shutdown_check():
+        logger.info("Shutdown requested - stopping wait loop")
+        return True
+    return False
+
+
+def _interruptible_sleep(duration: int, shutdown_check: Optional[Callable[[], bool]] = None) -> bool:
+    """Sleep for specified duration but check for shutdown periodically.
+    
+    Args:
+        duration: Total seconds to sleep
+        shutdown_check: Optional callable that returns True if shutdown was requested
+        
+    Returns:
+        True if shutdown was requested during sleep, False otherwise
+    """
+    # Sleep in 1-second increments to allow quick response to shutdown
+    for _ in range(duration):
+        if _should_stop_waiting(shutdown_check):
+            return True
+        time.sleep(1)
+    return False
 
 
 def get_issue_number_from_pr(repository: str, pr_number: int) -> Optional[int]:
@@ -265,14 +298,21 @@ def merge_pull_request(repository: str, pr_number: int, merge_method: str = MERG
         return False
 
 
-def wait_for_pr_ready(repository: str, pr_number: int, timeout: int = PR_READY_TIMEOUT_SECONDS) -> bool:
+def wait_for_pr_ready(repository: str, pr_number: int, timeout: int = PR_READY_TIMEOUT_SECONDS, 
+                     shutdown_check: Optional[Callable[[], bool]] = None) -> bool:
     """Wait for PR to be done.
     
     A PR is considered done when:
     1. The title no longer contains [WIP]
     2. Copilot has requested a reviewer
     
-    Returns True if PR is done, False on timeout.
+    Args:
+        repository: Repository in owner/repo format
+        pr_number: Pull request number
+        timeout: Maximum seconds to wait
+        shutdown_check: Optional callable that returns True if shutdown was requested
+    
+    Returns True if PR is done, False on timeout or shutdown.
     """
     owner, repo = split_owner_repo(repository)
     start_time = time.time()
@@ -280,12 +320,24 @@ def wait_for_pr_ready(repository: str, pr_number: int, timeout: int = PR_READY_T
     print(f"[PR #{pr_number}] Waiting for Copilot to finish work...")
     
     while (time.time() - start_time) < timeout:
+        # Check for shutdown request
+        if _should_stop_waiting(shutdown_check):
+            print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+            return False
+        
         try:
             # Get PR details
             pr_url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/pulls/{pr_number}"
             pr_response = session.get(pr_url, timeout=60)
             pr_response.raise_for_status()
             pr_data = pr_response.json()
+            
+            # Check if PR was closed (manually or by cancelled task)
+            pr_state = pr_data.get("state", "open")
+            if pr_state != "open":
+                print(f"[PR #{pr_number}] PR is {pr_state} - stopping wait")
+                print(f"[PR #{pr_number}] The Copilot task may have been cancelled or closed manually")
+                return False
             
             title = pr_data.get("title", "")
             has_wip = "[WIP]" in title or "[wip]" in title.lower()
@@ -298,13 +350,21 @@ def wait_for_pr_ready(repository: str, pr_number: int, timeout: int = PR_READY_T
         except (requests.ConnectionError, requests.Timeout) as e:
             logger.warning(f"[PR #{pr_number}] Network error while checking status: {e}")
             logger.warning(f"[PR #{pr_number}] Retrying in 10 seconds...")
-            time.sleep(10)
+            if _interruptible_sleep(10, shutdown_check):
+                print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+                return False
             continue
         except requests.HTTPError as e:
             if e.response and e.response.status_code >= 500:
                 logger.warning(f"[PR #{pr_number}] Server error {e.response.status_code}, retrying in 10 seconds...")
-                time.sleep(10)
+                if _interruptible_sleep(10, shutdown_check):
+                    print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+                    return False
                 continue
+            elif e.response and e.response.status_code == 404:
+                # PR was deleted
+                print(f"[PR #{pr_number}] PR not found (404) - may have been deleted")
+                return False
             else:
                 raise
         
@@ -328,7 +388,11 @@ def wait_for_pr_ready(repository: str, pr_number: int, timeout: int = PR_READY_T
         
         elapsed = int(time.time() - start_time)
         print(f"[PR #{pr_number}] Waiting for: {', '.join(waiting_for)} ({elapsed}s elapsed)")
-        time.sleep(30)
+        
+        # Sleep in small increments to allow quick shutdown response
+        if _interruptible_sleep(30, shutdown_check):
+            print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+            return False
     
     print(f"[PR #{pr_number}] Timeout waiting for Copilot to finish")
     return False
@@ -370,8 +434,15 @@ def get_pr_check_status(repository: str, pr_number: int) -> Dict[str, Any]:
     }
 
 
-def wait_for_pr_checks(repository: str, pr_number: int, timeout: int = PR_CHECK_TIMEOUT_SECONDS) -> bool:
+def wait_for_pr_checks(repository: str, pr_number: int, timeout: int = PR_CHECK_TIMEOUT_SECONDS,
+                       shutdown_check: Optional[Callable[[], bool]] = None) -> bool:
     """Wait for PR checks to complete.
+    
+    Args:
+        repository: Repository in owner/repo format
+        pr_number: Pull request number
+        timeout: Maximum seconds to wait
+        shutdown_check: Optional callable that returns True if shutdown was requested
     
     Returns True if all checks pass, False otherwise.
     """
@@ -381,21 +452,41 @@ def wait_for_pr_checks(repository: str, pr_number: int, timeout: int = PR_CHECK_
     print(f"[PR #{pr_number}] Waiting for checks to complete...")
     
     while (time.time() - start_time) < timeout:
+        # Check for shutdown request
+        if _should_stop_waiting(shutdown_check):
+            print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+            return False
+        
         try:
             pr_url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/pulls/{pr_number}"
             response = session.get(pr_url, timeout=60)
             response.raise_for_status()
             pr_data = response.json()
+            
+            # Check if PR was closed
+            pr_state = pr_data.get("state", "open")
+            if pr_state != "open":
+                print(f"[PR #{pr_number}] PR is {pr_state} - stopping wait")
+                return False
+                
         except (requests.ConnectionError, requests.Timeout) as e:
             logger.warning(f"[PR #{pr_number}] Network error while checking status: {e}")
             logger.warning(f"[PR #{pr_number}] Retrying in 10 seconds...")
-            time.sleep(10)
+            if _interruptible_sleep(10, shutdown_check):
+                print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+                return False
             continue
         except requests.HTTPError as e:
             if e.response and e.response.status_code >= 500:
                 logger.warning(f"[PR #{pr_number}] Server error {e.response.status_code}, retrying in 10 seconds...")
-                time.sleep(10)
+                if _interruptible_sleep(10, shutdown_check):
+                    print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+                    return False
                 continue
+            elif e.response and e.response.status_code == 404:
+                # PR was deleted
+                print(f"[PR #{pr_number}] PR not found (404) - may have been deleted")
+                return False
             else:
                 raise
         
@@ -433,7 +524,11 @@ def wait_for_pr_checks(repository: str, pr_number: int, timeout: int = PR_CHECK_
         
         elapsed = int(time.time() - start_time)
         print(f"[PR #{pr_number}] Mergeable state: {mergeable_state} - {elapsed}s elapsed")
-        time.sleep(30)
+        
+        # Sleep in small increments to allow quick shutdown response
+        if _interruptible_sleep(30, shutdown_check):
+            print(f"[PR #{pr_number}] Shutdown requested - stopping wait")
+            return False
     
     print(f"[PR #{pr_number}] Timeout waiting for checks")
     return False
