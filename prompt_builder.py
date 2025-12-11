@@ -9,7 +9,7 @@ The prompts are generally applicable and adapt to any repository based on:
 
 import os
 import subprocess
-from typing import Optional, List
+from typing import Optional
 from github_api import split_owner_repo
 
 
@@ -44,7 +44,7 @@ def get_repository_structure(repo_path: str = ".") -> str:
             timeout=10
         )
         
-        if find_cmd.returncode == 0:
+        if find_cmd.returncode == 0 and find_cmd.stdout.strip():
             files = find_cmd.stdout.strip().split("\n")
             return "Repository files:\n" + "\n".join(f"  {f}" for f in files[:50])  # Limit to 50 files
         
