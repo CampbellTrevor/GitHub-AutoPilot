@@ -4,6 +4,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch, MagicMock
 from prompt_builder import (
     build_improvement_prompt,
     get_repository_structure,
@@ -15,8 +16,16 @@ from prompt_builder import (
 class TestPromptBuilder(unittest.TestCase):
     """Test cases for prompt builder functions."""
     
-    def test_build_improvement_prompt_basic(self):
+    @patch('prompt_builder.get_repository_tree')
+    @patch('prompt_builder.get_repository_commits')
+    @patch('prompt_builder.get_repository_file')
+    def test_build_improvement_prompt_basic(self, mock_file, mock_commits, mock_tree):
         """Test that build_improvement_prompt generates a valid prompt."""
+        # Mock the GitHub API responses
+        mock_tree.return_value = "Repository structure:\n  README.md\n  main.py"
+        mock_commits.return_value = "abc1234 Initial commit\ndef5678 Add feature"
+        mock_file.return_value = None  # No CONTEXT.md
+        
         prompt = build_improvement_prompt("owner/repo", "main")
         
         # Check essential sections are present
@@ -34,6 +43,11 @@ class TestPromptBuilder(unittest.TestCase):
         self.assertIn("DO:", prompt)
         self.assertIn("DO NOT:", prompt)
         self.assertIn("documentation files", prompt.lower())
+        
+        # Verify GitHub API functions were called with correct parameters
+        mock_tree.assert_called_once_with("owner/repo", "main")
+        mock_commits.assert_called_once_with("owner/repo", "main")
+        mock_file.assert_called_once_with("owner/repo", "CONTEXT.md", "main")
     
     def test_read_context_file_exists(self):
         """Test reading CONTEXT.md when it exists."""
@@ -66,46 +80,39 @@ class TestPromptBuilder(unittest.TestCase):
         # Should have some content (even if it's an error message)
         self.assertGreater(len(commits), 0)
     
-    def test_prompt_without_context_file(self):
+    @patch('prompt_builder.get_repository_tree')
+    @patch('prompt_builder.get_repository_commits')
+    @patch('prompt_builder.get_repository_file')
+    def test_prompt_without_context_file(self, mock_file, mock_commits, mock_tree):
         """Test prompt generation works without CONTEXT.md."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Change to temp directory where no CONTEXT.md exists
-            original_dir = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                
-                prompt = build_improvement_prompt("test/repo", "main")
-                
-                # Should still generate a prompt
-                self.assertGreater(len(prompt), 0)
-                self.assertIn("No CONTEXT.md file found", prompt)
-                
-            finally:
-                os.chdir(original_dir)
+        # Mock the GitHub API responses
+        mock_tree.return_value = "Repository structure:\n  README.md"
+        mock_commits.return_value = "abc1234 Initial commit"
+        mock_file.return_value = None  # No CONTEXT.md
+        
+        prompt = build_improvement_prompt("test/repo", "main")
+        
+        # Should still generate a prompt
+        self.assertGreater(len(prompt), 0)
+        self.assertIn("No CONTEXT.md file found", prompt)
     
-    def test_prompt_with_context_file(self):
+    @patch('prompt_builder.get_repository_tree')
+    @patch('prompt_builder.get_repository_commits')
+    @patch('prompt_builder.get_repository_file')
+    def test_prompt_with_context_file(self, mock_file, mock_commits, mock_tree):
         """Test prompt generation includes CONTEXT.md content."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a test CONTEXT.md
-            context_path = os.path.join(tmpdir, "CONTEXT.md")
-            test_content = "# Test Project\n\nThis is a test context."
-            
-            with open(context_path, "w") as f:
-                f.write(test_content)
-            
-            # Change to temp directory
-            original_dir = os.getcwd()
-            try:
-                os.chdir(tmpdir)
-                
-                prompt = build_improvement_prompt("test/repo", "main")
-                
-                # Should include the context content
-                self.assertIn(test_content, prompt)
-                self.assertNotIn("No CONTEXT.md file found", prompt)
-                
-            finally:
-                os.chdir(original_dir)
+        test_content = "# Test Project\n\nThis is a test context."
+        
+        # Mock the GitHub API responses
+        mock_tree.return_value = "Repository structure:\n  README.md"
+        mock_commits.return_value = "abc1234 Initial commit"
+        mock_file.return_value = test_content  # CONTEXT.md exists
+        
+        prompt = build_improvement_prompt("test/repo", "main")
+        
+        # Should include the context content
+        self.assertIn(test_content, prompt)
+        self.assertNotIn("No CONTEXT.md file found", prompt)
 
 
 if __name__ == "__main__":
