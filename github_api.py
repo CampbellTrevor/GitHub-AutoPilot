@@ -88,6 +88,66 @@ def split_owner_repo(repo: str) -> Tuple[str, str]:
     return owner, name
 
 
+def validate_repository_access(repository: str) -> None:
+    """Validate that the repository exists and is accessible with current credentials.
+    
+    Args:
+        repository: Repository in 'owner/repo' format
+        
+    Raises:
+        RuntimeError: If repository is not accessible with detailed error message
+    """
+    owner, repo = split_owner_repo(repository)
+    
+    url = f"{GITHUB_API_URL}/repos/{owner}/{repo}"
+    
+    try:
+        response = session.get(url, timeout=30)
+        
+        if response.status_code == 404:
+            raise RuntimeError(
+                f"Repository '{repository}' not found or not accessible.\n"
+                f"Please check that:\n"
+                f"  1. The repository name is correct (format: owner/repo)\n"
+                f"  2. The repository exists on GitHub\n"
+                f"  3. Your GitHub token has access to this repository\n"
+                f"  4. If the repository is private, your token has the required scopes"
+            )
+        elif response.status_code == 401:
+            raise RuntimeError(
+                f"Authentication failed for repository '{repository}'.\n"
+                f"Please check that:\n"
+                f"  1. GH_TOKEN environment variable is set\n"
+                f"  2. The token is valid and not expired\n"
+                f"  3. You have authenticated with 'gh auth login'"
+            )
+        elif response.status_code == 403:
+            raise RuntimeError(
+                f"Access forbidden to repository '{repository}'.\n"
+                f"Please check that:\n"
+                f"  1. Your GitHub token has the required permissions\n"
+                f"  2. The repository allows API access\n"
+                f"  3. You haven't exceeded GitHub API rate limits"
+            )
+        
+        response.raise_for_status()
+        repo_data = response.json()
+        
+        logger.info(f"✓ Repository access validated: {repository}")
+        logger.info(f"  - Full name: {repo_data.get('full_name')}")
+        logger.info(f"  - Private: {repo_data.get('private')}")
+        logger.info(f"  - Default branch: {repo_data.get('default_branch')}")
+        
+    except RuntimeError:
+        # Re-raise our custom error messages
+        raise
+    except requests.RequestException as e:
+        raise RuntimeError(
+            f"Failed to validate repository access: {e}\n"
+            f"Please check your network connection and try again."
+        )
+
+
 def get_copilot_bot_id(repository: str) -> str:
     """Get the Copilot bot ID for assigning issues."""
     global _copilot_bot_id

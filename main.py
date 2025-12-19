@@ -25,7 +25,7 @@ from pr_manager import (
 from issue_manager import close_issue, get_issue
 from prompt_builder import build_improvement_prompt
 from metrics import metrics
-from github_api import split_owner_repo
+from github_api import split_owner_repo, validate_repository_access
 
 # Set up logging
 logging.basicConfig(
@@ -310,6 +310,15 @@ def continuous_improvement_loop() -> None:
     logger.info(f"Max Cycles: {MAX_CYCLES if MAX_CYCLES > 0 else 'Unlimited'}")
     logger.info(f"Delay Between Cycles: {DELAY_BETWEEN_CYCLES_SECONDS}s")
     logger.info("="*60)
+    
+    # Validate repository access before starting the loop
+    logger.info("\n[Validation] Checking repository access...")
+    try:
+        validate_repository_access(REPOSITORY)
+    except RuntimeError as e:
+        logger.error(f"Repository validation failed:\n{e}")
+        logger.error("\nPlease fix the above issues and try again.")
+        return
     
     # Create a shutdown check lambda
     shutdown_check = lambda: _shutdown_requested
