@@ -138,10 +138,10 @@ def validate_repository_access(repository: str) -> None:
         logger.info(f"  - Private: {repo_data.get('private')}")
         logger.info(f"  - Default branch: {repo_data.get('default_branch')}")
         
+    except RuntimeError:
+        # Re-raise our custom error messages
+        raise
     except requests.RequestException as e:
-        if isinstance(e, requests.HTTPError):
-            # Re-raise our custom error messages
-            raise
         raise RuntimeError(
             f"Failed to validate repository access: {e}\n"
             f"Please check your network connection and try again."
