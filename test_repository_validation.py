@@ -85,7 +85,7 @@ class TestGetOpenCopilotPRs(unittest.TestCase):
             get_open_copilot_prs('owner/nonexistent-repo')
         
         self.assertIn('not found or not accessible', str(context.exception))
-        self.assertIn('Repository name is correct', str(context.exception))
+        self.assertIn('repository name is correct', str(context.exception).lower())
     
     @patch('pr_manager.session')
     def test_get_open_copilot_prs_401(self, mock_session):

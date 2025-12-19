@@ -588,9 +588,32 @@ def get_open_copilot_prs(repository: str) -> List[Dict[str, Any]]:
         time.sleep(5)
         response = session.get(url, params=params, timeout=60)
         
-        # Handle errors on retry as well
-        if response.status_code in (404, 401, 403):
-            response.raise_for_status()
+        # Handle errors on retry with the same detailed messages
+        if response.status_code == 404:
+            raise RuntimeError(
+                f"Repository '{repository}' not found or not accessible.\n"
+                f"Please verify:\n"
+                f"  1. Repository name is correct (format: owner/repo)\n"
+                f"  2. Repository exists on GitHub\n"
+                f"  3. Your GitHub token (GH_TOKEN) has access to this repository\n"
+                f"  4. If private, ensure token has required scopes (repo, workflow)"
+            )
+        elif response.status_code == 401:
+            raise RuntimeError(
+                f"Authentication failed when accessing '{repository}'.\n"
+                f"Please check:\n"
+                f"  1. GH_TOKEN environment variable is set correctly\n"
+                f"  2. Token is valid (not expired)\n"
+                f"  3. You've run 'gh auth login' successfully"
+            )
+        elif response.status_code == 403:
+            raise RuntimeError(
+                f"Access forbidden to '{repository}'.\n"
+                f"This could mean:\n"
+                f"  1. Token lacks required permissions (needs 'repo' scope)\n"
+                f"  2. API rate limit exceeded\n"
+                f"  3. Repository settings prevent API access"
+            )
         
         response.raise_for_status()
         all_prs = response.json()
